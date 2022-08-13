@@ -1,0 +1,266 @@
+---
+title: "Football"
+author: "Mauricio"
+date: '2022-06-19'
+output: html_document
+---
+```{r}
+
+library("tidyverse")
+library("ggplot2")
+
+raw_results = read_csv("football/results.csv")
+
+```
+
+First let's check what are the most repeated matches in history
+
+For doing that, I need to get the same order of the teams (no matter which team was home or away)
+So I use the pmin function to get the first team alphabetically, and pmax to get the last team alphabetically
+That way I have the same teams order in each row
+
+
+```{r}
+results = raw_results %>%
+  mutate(alphabetical_team_1=pmin(home_team,away_team),
+         alphabetical_team_2=pmax(home_team,away_team),
+         alphabetical_teams=paste(alphabetical_team_1,alphabetical_team_2))
+```
+
+Once I have the teams in the same order, I will group by match teams, count and order by what are the most repeated matches
+```{r}
+most_played_matches = results %>%
+  group_by(alphabetical_teams) %>%
+  summarise(number_of_matches = n()) %>%
+  arrange(-number_of_matches)
+
+
+print(most_played_matches)
+```
+
+
+
+As we can see, the most played match is Argentina v Uruguay. 
+Lets see a plot with the top 10 most repeated matches
+```{r}
+ggplot(data = most_played_matches[1:10,]) + 
+  geom_bar(mapping=aes(y = reorder(alphabetical_teams, number_of_matches), 
+                       x = number_of_matches,
+                       fill = alphabetical_teams),stat='identity') + 
+  theme(legend.position = "none") +
+  labs(title = "Most played international matches ever", x = "Times played", y = "Teams")
+
+
+```
+
+
+
+Now lets check what are the teams with most wins
+To do so, lets create a new column where we have the winner of each match
+```{r}
+
+results = results %>%
+  mutate(team=ifelse(
+    home_score == away_score,
+    "Draw",
+    ifelse(
+    home_score > away_score,
+    home_team,
+    away_team
+  )))
+```
+
+
+Now lets see what are the top 10 teams with the most wins
+```{r}
+limit_date = "2022-10-17"
+most_winning_teams = results %>%
+  filter(date<limit_date)
+
+most_winning_teams = most_winning_teams %>%
+  group_by(team) %>%
+  filter(team != "Draw") %>%
+  summarise(wins=n()) %>%
+  arrange(-wins)
+
+ggplot(data = most_winning_teams[1:10,]) + 
+  geom_bar(mapping = aes(y = wins, 
+                         x = reorder(team,-wins),
+                         fill = team),
+           stat='identity') +
+  labs(title = "Most wins by team", y = "Wins", x = "Team") +
+  theme(legend.position = "none")
+
+```
+
+
+
+Since every team has played a different number of matches
+Let's see what are the teams with most played matches
+
+To know how many matches each team played, 
+I will add home_team and away_team columns in a data frame
+And then group by team names
+```{r}
+matches_played = data.frame(team = c(results$home_team,results$away_team)) %>%
+  group_by(team) %>%
+  summarise(matches = n()) %>%
+  arrange(-matches)
+```
+
+
+
+With next plot, we can see what teams played the most matches in history
+```{r}
+ggplot(data = matches_played[1:10,]) + 
+  geom_point(mapping = aes(y = matches, 
+                         x = reorder(team,-matches),
+                         fill = team),
+           stat='identity') +
+  labs(title = "Most played matches by team", y = "Matches", x = "Team") +
+  theme(legend.position = "none")
+
+```
+
+
+Now let's calculate the percentage of wins of each team
+To do that, I will merge the matches played data frame with most winning teams
+```{r}
+wins_rate = merge(matches_played,most_winning_teams,by="team") %>%
+  mutate(wins_rate = wins / matches * 100) %>%
+  filter(matches > 100 | team == "Mongolia") %>%
+  arrange(-wins_rate)
+
+```
+
+
+Now lets see the wins rate
+```{r}
+ggplot(data = wins_rate[1:10,]) + 
+  geom_bar(mapping = aes(y = wins_rate, 
+                         x = reorder(team,-wins_rate),
+                         fill = team),
+           stat='identity') +
+  labs(title = "Win rate", y = "Percentage", x = "Team") +
+  theme(legend.position = "none")
+```
+
+
+
+Now lets plot both the matches played and the winning rate inside it
+For doing so, lets convert from wide to long data frame
+```{r}
+
+wins_rate_long = 
+  gather(wins_rate, type, value, matches:wins)
+```
+
+
+Now create a list of teams with best winning rates
+
+```{r}
+top_10_teams = wins_rate_long %>%
+  arrange(-wins_rate) %>%
+  slice(1:20) %>%
+  select(team) %>%
+  unique()
+```
+  
+Lets add the wins rate and matches played to that list
+
+```{r}
+wins_rate_long_top_10 = merge(wins_rate_long, top_10_teams, by="team") %>%
+  arrange(-wins_rate)
+```
+
+Lets substract wins from matches so the columns dont add up
+
+  
+```{r}
+wins_rate_long_top_10$value[wins_rate_long_top_10$type=="matches"] = 
+  wins_rate_long_top_10$value[wins_rate_long_top_10$type=="matches"] - wins_rate_long_top_10$value[wins_rate_long_top_10$type=="wins"]
+```
+  
+
+Now lets plot the data and see the best winning rate teams, with columns of wins and matches played stacked up together
+Along with labels of the winning rates
+ 
+```{r}
+ggplot(data = wins_rate_long_top_10) + 
+  geom_bar(position = "stack",
+            mapping = aes(y = value, 
+                         x = reorder(team,-wins_rate),
+                         fill = type),
+           stat='identity') +
+  labs(title = "Matches played and won", subtitle="Ordered by best winning percentage", y = "Matches played and won", x = "Team") +
+  geom_text(aes(x=team,y=50,
+                label=ifelse(type=="wins",paste0(round(wins_rate,0), "%"),"")
+                )
+            )
+
+
+```
+ 
+ 
+ 
+We can compare all countries in a single map to know the best ones
+For doing that we need to merge a map data with the winning rates data frame
+
+```{r}
+
+world_map <- map_data("world") 
+colnames(world_map)[5] <- "team"  
+
+world_map <- merge(world_map,wins_rate,by="team",all = TRUE) %>%
+  arrange(order)
+
+ggplot(world_map, aes(x = long, y = lat, group = group, fill=wins_rate)) +
+  geom_polygon(colour = "white", show.legend = TRUE) +
+  scale_fill_gradient(low="red", high="green")
+
+
+```
+
+As we can see, some countries info are missing, like USA or China.
+This is because the country names in our dataset and the country names in the map differ.
+We will fix that by replacing the names with the correct ones.
+
+```{r}
+world_map <- map_data("world") 
+colnames(world_map)[5] <- "team"  
+
+world_map["team"][world_map["team"] == "China"] <- "China PR"
+world_map["team"][world_map["team"] == "USA"] <- "United States"
+world_map["team"][world_map["team"] == "Democratic Republic of the Congo"] <- "DR Congo"
+world_map["team"][world_map["team"] == "Ireland"] <- "Republic of Ireland"
+
+```
+
+We also note that UK is considered a single country in the map, but its regions are included in the subregion column. So we will replace team name with subregion instead of country in this case.
+
+```{r}
+
+world_map["team"][world_map["team"] == "UK"] <- world_map["subregion"][world_map["team"] == "UK"]
+# world_map["team"][world_map["team"] == "Great Britain"] <- "England"
+
+```
+
+Then let's merge the map with our data set
+
+```{r}
+world_map <- merge(world_map,wins_rate,by="team",all = TRUE) %>%
+  arrange(order)
+
+```
+
+Now we can plot it again and we will see the missing countries now fixed.
+
+```{r}
+
+# world_map["wins_rate"][world_map["team"] == "Scotland"] = 0
+
+ggplot(world_map, aes(x = long, y = lat, group = group, fill=wins_rate)) +
+  geom_polygon(show.legend = TRUE) +
+  scale_fill_gradient(low="red", high="green")
+```
+
