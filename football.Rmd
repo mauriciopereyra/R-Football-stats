@@ -9,7 +9,7 @@ output: html_document
 library("tidyverse")
 library("ggplot2")
 
-raw_results = read_csv("football/results.csv")
+raw_results = read_csv("results.csv")
 
 ```
 
